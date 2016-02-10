@@ -5,7 +5,6 @@ using System.Data.SqlClient;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
@@ -64,7 +63,7 @@ namespace Sqlcaster
             return c;
         }
 
-        public SqlParameter[] GetSqlParameters(string query, object parameters)
+        public SqlParameter[] GetSqlParameters(ref string query, object parameters)
         {
             if (query == null)
             {
@@ -82,9 +81,29 @@ namespace Sqlcaster
             var propertyLookup = parameters.GetType().GetProperties()
                 .ToDictionary(o => o.Name, StringComparer.InvariantCultureIgnoreCase);
 
-            return parameterNames
-                .Select(name => new SqlParameter(name, propertyLookup[name].GetValue(parameters)))
-                .ToArray();
+            var sqlparameters = new List<SqlParameter>(parameterNames.Length);
+            foreach (var name in parameterNames)
+            {
+                var prop = propertyLookup[name];
+                object value = prop.GetValue(parameters);
+
+                if (prop.PropertyType.IsArray)
+                {
+                    var array = ((Array)value).Cast<object>().ToArray();
+                    var newParameters = Enumerable.Range(0, array.Length)
+                        .Select(num => name + num)
+                        .ToArray();
+
+                    query = Regex.Replace(query, @"@" + Regex.Escape(name) + @"\b",
+                        "(@" + string.Join(", @", newParameters) + ")");
+                    sqlparameters.AddRange(array.Select((o, num) => new SqlParameter(name + num, o)));
+                }
+                else
+                {
+                    sqlparameters.Add(new SqlParameter(name, value));
+                }
+            }
+            return sqlparameters.ToArray();
         }
 
         public static Dictionary<string, PropertyInfo> GetPropertyInfo(Type type)
@@ -101,8 +120,6 @@ namespace Sqlcaster
         IQuery<T> From(string expression);
         IQuery<T> Where(string expression);
         IQuery<T> OrderBy(string expression);
-        IQuery<T> Manifest(Expression<Func<T, object>> property,
-            Expression<Func<T, object>> foreignKey = null);
         Task<IList<T>> ToListAsync(object parameters = null, int page = 0, int pageSize = 10);
     }
 
@@ -116,11 +133,10 @@ namespace Sqlcaster
         private readonly List<string> Froms = new List<string>();
         private readonly List<string> Wheres = new List<string>();
         private readonly List<string> OrderBys = new List<string>();
-        private readonly List<Manifest<T>> Manifests = new List<Manifest<T>>();
 
         static Query()
         {
-            Table = typeof(T).Name;
+            Table = "[" + typeof(T).Name + "]";
             DefaultProperties = Bow.GetPropertyInfo(typeof(T));
         }
 
@@ -153,13 +169,6 @@ namespace Sqlcaster
             return this;
         }
 
-        public IQuery<T> Manifest(Expression<Func<T, object>> property,
-            Expression<Func<T, object>> foreignKey = null)
-        {
-            Manifests.Add(new Manifest<T>(property, foreignKey));
-            return this;
-        }
-
         public async Task<IList<T>> ToListAsync(object parameters = null, int page = 0, int pageSize = 10)
         {
             string select = Selects.Any() ?
@@ -184,13 +193,13 @@ namespace Sqlcaster
             using (var c = await Bow.OpenConnectionAsync())
             using (var cmd = c.CreateCommand())
             {
-                cmd.CommandText = query;
-                cmd.Parameters.AddRange(Bow.GetSqlParameters(query, parameters));
+                cmd.Parameters.AddRange(Bow.GetSqlParameters(ref query, parameters));
                 cmd.Parameters.AddRange(new[]
                 {
                     new SqlParameter("QueryToListAsyncPage", page),
                     new SqlParameter("QueryToListAsyncPageSize", pageSize),
                 });
+                cmd.CommandText = query;
 
                 var reader = await cmd.ExecuteReaderAsync();
                 var fieldNames = Enumerable.Range(0, reader.FieldCount)
@@ -216,21 +225,51 @@ namespace Sqlcaster
                     }
                     list.Add(item);
                 }
+
                 return list;
             }
         }
     }
 
-    internal class Manifest<T>
+    public static class QueryExtensions
     {
-        private Expression<Func<T, object>> foreignKey;
-        private Expression<Func<T, object>> property;
-
-        public Manifest(Expression<Func<T, object>> property,
-            Expression<Func<T, object>> foreignKey = null)
+        public static async Task FillAsync<T, TTarget, TKey>(
+            this IQuery<T> query,
+            IEnumerable<TTarget> targets,
+            Expression<Func<TTarget, T>> reference,
+            Func<TTarget, TKey> key,
+            Func<T, TKey> primaryKey)
         {
-            this.property = property;
-            this.foreignKey = foreignKey;
+            var actualTargets = targets.Select(t => new { t, key = key(t) })
+                .Where(o => o.key != null)
+                .ToDictionary(o => o.key, o => o.t);
+
+            var references = await query.ToListAsync(new { Ids = actualTargets.Keys.ToArray() });
+
+            var prop = Helpers.GetPropertyInfo(reference);
+            foreach (var r in references)
+            {
+                var pk = primaryKey(r);
+                var target = actualTargets[pk];
+                prop.SetValue(target, r);
+            }
+        }
+
+    }
+
+    public static class Helpers
+    {
+        public static PropertyInfo GetPropertyInfo(LambdaExpression exp)
+        {
+            MemberExpression body = exp.Body as MemberExpression;
+
+            if (body == null)
+            {
+                UnaryExpression ubody = (UnaryExpression)exp.Body;
+                body = ubody.Operand as MemberExpression;
+            }
+
+            return body.Member as PropertyInfo;
         }
     }
 }

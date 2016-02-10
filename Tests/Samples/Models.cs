@@ -19,12 +19,18 @@ namespace Tests.Samples
 
         public int Int { get; private set; }
 
-        public Guid ForeignId { get; private set; }
-        public Foo Foreign { get; private set; }
+        public Guid? ForeignId { get; private set; }
+        public Foreign Foreign { get; private set; }
 
         public FooReference Reference { get; private set; }
 
         public FooChild[] Children { get; private set; }
+    }
+
+    public class Foreign : IId
+    {
+        public Guid Id { get; private set; }
+        public string Name { get; private set; }
     }
 
     public class FooReference
