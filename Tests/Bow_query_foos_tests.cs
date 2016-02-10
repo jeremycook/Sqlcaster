@@ -48,13 +48,42 @@ namespace Tests
         }
 
         [TestMethod]
-        public async Task Include_foos()
+        public async Task Fill_foos_references()
         {
             var foos = await bow.Query<Foo>()
-                //.IncludeReference(o => o.Foreign, o => o.ForeignId)
-                //.IncludeChild(o => o.Reference, o => o.FooId)
-                //.IncludeChildren(o => o.Children, o => o.Id)
-                .ToListAsync();
+                .ToListAsync(page: 1, pageSize: 100);
+
+            var foreigners = await bow.Query<Foreign>()
+                .Where("Id in @Ids")
+                .ToListAsync(new
+                {
+                    Ids = foos.Select(o => o.ForeignId).Where(o => o.HasValue).ToArray()
+                });
+
+            var fooRefs = await bow.Query<FooReference>()
+                .Where("FooId in @Ids")
+                .ToListAsync(new
+                {
+                    Ids = foos.Select(o => o.Id).ToArray()
+                });
+
+            var fooChildren = await bow.Query<FooChild>()
+                .Where("FooId in @Ids")
+                .ToListAsync(new
+                {
+                    Ids = foos.Select(o => o.Id).ToArray()
+                });
+
+            foos.FillWith(foreigners, o => o.Foreign, o => o.ForeignId, f => f.Id);
+            foos.FillWith(fooRefs, o => o.Reference, o => o.Id, r => r.FooId);
+            foos.FillWith(fooChildren, o => o.Children, o => o.Id, c => c.FooId);
+        }
+
+        [TestMethod]
+        public async Task Fill_foos()
+        {
+            var foos = await bow.Query<Foo>()
+                .ToListAsync(page: 1, pageSize: 100);
 
             await bow.Query<Foreign>()
                 .Where("Id in @Ids")

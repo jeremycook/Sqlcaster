@@ -257,6 +257,63 @@ namespace Sqlcaster
 
     }
 
+    public static class EnumerableExtensions
+    {
+        public static void FillWith<T, TReference, TKey>(
+            this IEnumerable<T> list,
+            IEnumerable<TReference> references,
+            Expression<Func<T, TReference>> referenceSelector,
+            Func<T, TKey> listKeySelector,
+            Func<TReference, TKey> referenceKeySelector)
+        {
+            var prop = Helpers.GetPropertyInfo(referenceSelector);
+
+            var dict = list
+                .GroupBy(o => listKeySelector(o))
+                .Where(o => o.Key != null)
+                .ToDictionary(o => o.Key, o => o.AsEnumerable());
+
+            foreach (var reference in references.ToDictionary(o => referenceKeySelector(o)))
+            {
+                foreach (var item in dict[reference.Key])
+                {
+                    prop.SetValue(item, reference.Value);
+                }
+            }
+        }
+
+        public static void FillWith<T, TReference, TKey>(
+            this IEnumerable<T> list,
+            IEnumerable<TReference> references,
+            Expression<Func<T, IEnumerable<TReference>>> referenceSelector,
+            Func<T, TKey> listKeySelector,
+            Func<TReference, TKey> referenceKeySelector)
+        {
+            var prop = Helpers.GetPropertyInfo(referenceSelector);
+
+            var dict = list.GroupBy(o => listKeySelector(o))
+                .ToDictionary(o => o.Key, o => o.AsEnumerable());
+
+            foreach (var group in references.GroupBy(o => referenceKeySelector(o)))
+            {
+                IEnumerable<TReference> children;
+                if (prop.PropertyType.IsArray)
+                {
+                    children = group.ToArray();
+                }
+                else
+                {
+                    children = group.ToList();
+                }
+
+                foreach (var item in dict[group.Key])
+                {
+                    prop.SetValue(item, children);
+                }
+            }
+        }
+    }
+
     public static class Helpers
     {
         public static PropertyInfo GetPropertyInfo(LambdaExpression exp)
