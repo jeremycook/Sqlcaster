@@ -311,18 +311,18 @@ namespace Sqlcaster
 
             foreach (var group in references.GroupBy(o => referenceKeySelector(o)))
             {
-                IEnumerable<TReference> children;
-                if (prop.PropertyType.IsArray)
-                {
-                    children = group.ToArray();
-                }
-                else
-                {
-                    children = group.ToList();
-                }
-
                 foreach (var item in dict[group.Key])
                 {
+                    IEnumerable<TReference> children;
+                    if (prop.PropertyType.IsArray)
+                    {
+                        children = group.ToArray();
+                    }
+                    else
+                    {
+                        children = group.ToList();
+                    }
+
                     prop.SetValue(item, children);
                 }
             }
