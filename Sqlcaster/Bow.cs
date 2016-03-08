@@ -112,6 +112,21 @@ namespace Sqlcaster
                 .Where(prop => BasicTypes.Contains(prop.PropertyType) || prop.PropertyType.IsEnum)
                 .ToDictionary(o => o.Name, StringComparer.InvariantCultureIgnoreCase);
         }
+
+        public static TableInfo GetTableInfo(Type type)
+        {
+            return new TableInfo
+            {
+                Name = type.Name,
+                SqlName = "[" + type.Name + "]",
+            };
+        }
+    }
+
+    public class TableInfo
+    {
+        public string Name { get; set; }
+        public string SqlName { get; set; }
     }
 
     public interface IQuery<T>
@@ -126,7 +141,7 @@ namespace Sqlcaster
     public class Query<T> : IQuery<T>
     {
         private static readonly Dictionary<string, PropertyInfo> DefaultProperties;
-        private static readonly string Table;
+        private static readonly TableInfo TableInfo;
 
         private readonly Bow Bow;
         private readonly List<string> Selects = new List<string>();
@@ -136,7 +151,7 @@ namespace Sqlcaster
 
         static Query()
         {
-            Table = "[" + typeof(T).Name + "]";
+            TableInfo = Bow.GetTableInfo(typeof(T));
             DefaultProperties = Bow.GetPropertyInfo(typeof(T));
         }
 
@@ -180,7 +195,7 @@ namespace Sqlcaster
 
             var unions = Froms.Any() ?
                 string.Join("\nunion all ", Froms.Select(name => select + ", QueryToListAsyncTable = '" + name + "' from " + name + where)) :
-                select + ", QueryToListAsyncTable = '" + Table + "' from " + Table + where;
+                select + ", QueryToListAsyncTable = '" + TableInfo.Name + "' from " + TableInfo.SqlName + where;
 
             string orderBy = OrderBys.Any() ?
                 "order by " + string.Join(", ", OrderBys) :
